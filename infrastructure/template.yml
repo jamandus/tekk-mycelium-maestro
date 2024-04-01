@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Description: tekk-mycelium-maestro is an experimental project to practice and expand proficiency in Java and AWS
+
+Parameters:
+  Stage:
+    Type: String
+    Default: "development"
+
+Globals:
+  Function:
+    Runtime: java17
+    Architectures:
+      - x86_64
+    MemorySize: 512
+    Timeout: 30
+
+Resources:
+  BoletusBouncer:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: tekk-boletus-bouncer
+      Description: API Gateway for the tekk-mycelium-maestro lambda
+
+  BoletusBouncerResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt BoletusBouncer.RootResourceId
+      PathPart: "{proxy+}"
+      RestApiId: !Ref BoletusBouncer
+
+  BoletusBouncerMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      AuthorizationType: NONE
+      HttpMethod: ANY
+      ResourceId: !Ref BoletusBouncerResource
+      RestApiId: !Ref BoletusBouncer
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${MyceliumMaestro.Arn}/invocations"
+
+  BoletusBouncerDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: BoletusBouncerMethod
+    Properties:
+      RestApiId: !Ref BoletusBouncer
+
+  BoletusBouncerUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref BoletusBouncer
+          Stage: !Ref Stage
+      Description: Usage plan for tekk-boletus-bouncer REST API.
+      Quota:
+        Limit: 10
+        Period: MONTH
+      Throttle:
+        BurstLimit: 2
+        RateLimit: 1
+      UsagePlanName: tekk-boletus-bouncer-usage-plan
+
+  MyceliumMaestro:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: An experimental mushroom lambda, after being invoked it interacts with a fungal dynamo-ddb table.
+      CodeUri: target/tekk-mycelium-maestro-1.0-SNAPSHOT.jar
+      FunctionName: tekk-mycelium-maestro
+      Handler: handler.MyceliumMaestro::handleRequest
+      Role: !GetAtt MyceliumMaestroRole.Arn
+
+  MyceliumMaestroRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role to grant tekk-mycelium-maestro action policies needed in the tekk ecosystem
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref MyceliumMaestroCloudWatchPolicy
+        - Fn::ImportValue:
+            Fn::Sub "${MushroomManorStack}-MushroomManorReadWritePolicyName"
+
+  MyceliumMaestroCloudWatchPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for tekk-mycelium-maestro cloud watch logging
+      ManagedPolicyName: mycelium-maestro-cloudwatch-policy
+      Path: /
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:*
